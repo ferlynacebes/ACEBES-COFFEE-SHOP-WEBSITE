@@ -676,37 +676,6 @@ include __DIR__ . "/includes/header.php";
 
 </section>
 
-<!-- =========================================================
-     CART NOTIFICATION
-========================================================= -->
-
-<div
-    class="menu-cart-notification"
-    id="menu-cart-notification"
-    role="status"
-    aria-live="polite"
->
-
-    <span
-        class="menu-notification-icon"
-        aria-hidden="true"
-    >
-        ✓
-    </span>
-
-    <div>
-
-        <strong>
-            Added to cart!
-        </strong>
-
-        <span id="menu-notification-text">
-            Your drink has been added.
-        </span>
-
-    </div>
-
-</div>
 
 
 <!-- =========================================================

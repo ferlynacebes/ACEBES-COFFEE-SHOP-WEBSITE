@@ -1,60 +1,51 @@
 <?php
 
 session_start();
-
 require_once "config/db.php";
 
-
-/* =========================================================
-   IF ALREADY LOGGED IN
-========================================================= */
+/*
+|--------------------------------------------------------------------------
+| CUSTOMER REGISTRATION
+|--------------------------------------------------------------------------
+| Customer accounts are stored in the users table.
+| Admin accounts use the separate admin_users table and are never created
+| through this page.
+*/
 
 if (isset($_SESSION["user_id"])) {
-
-    if (($_SESSION["user_role"] ?? "") === "admin") {
-        header("Location: admin/dashboard.php");
-        exit();
-    }
-
     header("Location: index.php");
     exit();
 }
 
-
-/* =========================================================
-   VARIABLES
-========================================================= */
+if (isset($_SESSION["admin_id"])) {
+    header("Location: admin/dashboard.php");
+    exit();
+}
 
 $error = "";
 $success = "";
 
-$name = "";
-$email = "";
-
-
-/* =========================================================
-   REGISTRATION PROCESS
-========================================================= */
+$name = trim($_POST["name"] ?? "");
+$email = trim($_POST["email"] ?? "");
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
-    $name = trim($_POST["name"] ?? "");
-    $email = trim($_POST["email"] ?? "");
     $password = $_POST["password"] ?? "";
     $confirm_password = $_POST["confirm_password"] ?? "";
 
-
-    /* =====================================================
-       VALIDATION
-    ===================================================== */
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION
+    |--------------------------------------------------------------------------
+    */
 
     if ($name === "" || $email === "" || $password === "" || $confirm_password === "") {
 
-        $error = "Please fill in all fields.";
+        $error = "Please complete all required fields.";
 
     } elseif (strlen($name) < 2) {
 
-        $error = "Please enter a valid name.";
+        $error = "Please enter your full name.";
 
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
@@ -70,126 +61,109 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     } else {
 
+        try {
 
-        /* =================================================
-           CHECK IF EMAIL ALREADY EXISTS
-        ================================================= */
+            /*
+            |--------------------------------------------------------------------------
+            | CHECK CUSTOMER EMAIL
+            |--------------------------------------------------------------------------
+            */
 
-        $checkStmt = $conn->prepare(
-            "SELECT id
-             FROM users
-             WHERE email = ?
-             LIMIT 1"
-        );
+            $check = $conn->prepare(
+                "SELECT id
+                 FROM users
+                 WHERE email = ?
+                 LIMIT 1"
+            );
 
+            if (!$check) {
+                throw new Exception("Unable to prepare email check.");
+            }
 
-        if (!$checkStmt) {
+            $check->bind_param("s", $email);
+            $check->execute();
 
-            $error = "Unable to process registration. Please try again.";
+            $result = $check->get_result();
 
-        } else {
+            if ($result->num_rows > 0) {
 
-            $checkStmt->bind_param("s", $email);
+                $error = "This email address is already registered.";
 
-            $checkStmt->execute();
-
-            $checkResult = $checkStmt->get_result();
-
-
-            if ($checkResult->num_rows > 0) {
-
-                $error = "An account with this email already exists.";
-
-                $checkStmt->close();
+                $check->close();
 
             } else {
 
-                $checkStmt->close();
+                $check->close();
 
+                /*
+                |--------------------------------------------------------------------------
+                | HASH PASSWORD
+                |--------------------------------------------------------------------------
+                */
 
-                /* =========================================
-                   HASH PASSWORD
-                ========================================= */
-
-                $hashedPassword = password_hash(
+                $hashed_password = password_hash(
                     $password,
                     PASSWORD_DEFAULT
                 );
 
+                /*
+                |--------------------------------------------------------------------------
+                | CREATE CUSTOMER
+                |--------------------------------------------------------------------------
+                */
 
-                /* =========================================
-                   CREATE CUSTOMER ACCOUNT
-                ========================================= */
-
-                $role = "customer";
-
-
-                $insertStmt = $conn->prepare(
+                $stmt = $conn->prepare(
                     "INSERT INTO users
-                    (name, email, password, role)
-                    VALUES (?, ?, ?, ?)"
+                        (name, email, password, role)
+                     VALUES
+                        (?, ?, ?, 'customer')"
                 );
 
+                if (!$stmt) {
+                    throw new Exception("Unable to prepare registration.");
+                }
 
-                if (!$insertStmt) {
+                $stmt->bind_param(
+                    "sss",
+                    $name,
+                    $email,
+                    $hashed_password
+                );
 
-                    $error =
-                        "Unable to create your account. Please try again.";
+                if ($stmt->execute()) {
+
+                    $stmt->close();
+
+                    $success = "Account created successfully! You can now log in.";
+
+                    /*
+                    | Do not automatically log the customer in.
+                    | This keeps registration separate from login.
+                    */
+
+                    $name = "";
+                    $email = "";
 
                 } else {
 
-                    $insertStmt->bind_param(
-                        "ssss",
-                        $name,
-                        $email,
-                        $hashedPassword,
-                        $role
-                    );
+                    $stmt->close();
 
-
-                    if ($insertStmt->execute()) {
-
-                        $insertStmt->close();
-
-
-                        /*
-                        =========================================
-                           SUCCESS
-                        =========================================
-                        */
-
-                        $success =
-                            "Account created successfully! You can now log in.";
-
-                        $name = "";
-                        $email = "";
-
-
-                    } else {
-
-                        if ($conn->errno === 1062) {
-
-                            $error =
-                                "An account with this email already exists.";
-
-                        } else {
-
-                            $error =
-                                "Unable to create your account. Please try again.";
-                        }
-
-
-                        $insertStmt->close();
-                    }
+                    $error = "Registration could not be completed. Please try again.";
                 }
             }
+
+        } catch (Throwable $e) {
+
+            /*
+            | Keep database details hidden from customers.
+            */
+
+            $error = "Something went wrong while creating your account. Please try again.";
         }
     }
 }
 
 ?>
-
-
 <!DOCTYPE html>
 <html lang="en">
 
@@ -202,18 +176,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Register | Cafelia</title>
+    <title>Create Account | Acebes Coffee</title>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Playfair+Display:wght@500;600;700&display=swap"
+        rel="stylesheet"
+    >
 
     <style>
 
-        @import url(
-            'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap'
-        );
-
-
         :root {
-
             --espresso: #24150f;
             --espresso-2: #321d14;
             --coffee: #5a3827;
@@ -226,54 +201,40 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             --muted: #79695d;
 
+            --success-bg: #eef7f0;
+            --success: #39734b;
+
             --danger-bg: #fff0ec;
             --danger: #a94737;
 
-            --success-bg: #eef8ef;
-            --success: #47734d;
-
             --border: rgba(91, 58, 39, .15);
 
-            --shadow:
-                0 24px 70px rgba(36, 21, 15, .16);
+            --shadow: 0 24px 70px rgba(36, 21, 15, .16);
         }
 
-
         * {
-
             box-sizing: border-box;
-
             margin: 0;
-
             padding: 0;
         }
 
-
         body {
-
             min-height: 100vh;
 
-            font-family:
-                "DM Sans",
-                Arial,
-                sans-serif;
-
+            font-family: "DM Sans", Arial, sans-serif;
             color: var(--espresso);
 
             background:
-
                 radial-gradient(
                     circle at 15% 15%,
                     rgba(216, 163, 109, .18),
                     transparent 28%
                 ),
-
                 radial-gradient(
                     circle at 85% 85%,
                     rgba(185, 130, 82, .13),
                     transparent 30%
                 ),
-
                 linear-gradient(
                     135deg,
                     #fbf6ee 0%,
@@ -282,22 +243,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 );
 
             display: flex;
-
             align-items: center;
-
             justify-content: center;
 
             padding: 34px 20px;
 
             position: relative;
-
             overflow-x: hidden;
         }
 
-
         body::before,
         body::after {
-
             content: "";
 
             position: fixed;
@@ -309,61 +265,40 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             filter: blur(2px);
         }
 
-
         body::before {
-
             width: 360px;
-
             height: 360px;
 
             left: -180px;
-
             top: -150px;
 
-            border:
-                1px solid
-                rgba(90, 56, 39, .10);
+            border: 1px solid rgba(90, 56, 39, .10);
         }
 
-
         body::after {
-
             width: 420px;
-
             height: 420px;
 
             right: -220px;
-
             bottom: -210px;
 
-            border:
-                1px solid
-                rgba(90, 56, 39, .10);
+            border: 1px solid rgba(90, 56, 39, .10);
         }
 
-
-        /* =====================================================
+        /* =========================================================
            REGISTER SHELL
-        ===================================================== */
+        ========================================================= */
 
         .register-shell {
-
             width: min(1060px, 100%);
-
-            min-height: 680px;
+            min-height: 650px;
 
             display: grid;
+            grid-template-columns: 1.02fr .98fr;
 
-            grid-template-columns:
-                1.02fr .98fr;
+            background: rgba(255, 253, 249, .72);
 
-            background:
-                rgba(255, 253, 249, .72);
-
-            border:
-                1px solid
-                rgba(255, 255, 255, .72);
-
+            border: 1px solid rgba(255, 255, 255, .72);
             border-radius: 30px;
 
             overflow: hidden;
@@ -371,29 +306,23 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             box-shadow: var(--shadow);
 
             backdrop-filter: blur(18px);
-
             -webkit-backdrop-filter: blur(18px);
 
             position: relative;
-
             z-index: 1;
         }
 
-
-        /* =====================================================
+        /* =========================================================
            LEFT BRAND PANEL
-        ===================================================== */
+        ========================================================= */
 
         .brand-panel {
-
             position: relative;
 
             padding: 54px;
 
             display: flex;
-
             flex-direction: column;
-
             justify-content: space-between;
 
             color: var(--cream);
@@ -408,89 +337,61 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             overflow: hidden;
         }
 
-
         .brand-panel::before {
-
             content: "";
 
             position: absolute;
 
             width: 310px;
-
             height: 310px;
 
-            border:
-                1px solid
-                rgba(255, 255, 255, .09);
-
-            border-radius: 50%;
-
             right: -120px;
-
             top: -90px;
+
+            border: 1px solid rgba(255, 255, 255, .09);
+            border-radius: 50%;
         }
 
-
         .brand-panel::after {
-
             content: "";
 
             position: absolute;
 
             width: 250px;
-
             height: 250px;
 
-            border:
-                1px solid
-                rgba(216, 163, 109, .15);
-
-            border-radius: 50%;
-
             left: -130px;
-
             bottom: -100px;
-        }
 
+            border: 1px solid rgba(216, 163, 109, .15);
+            border-radius: 50%;
+        }
 
         .brand-content,
         .brand-footer {
-
             position: relative;
-
             z-index: 2;
         }
 
-
         .brand-logo {
+            display: inline-flex;
+            align-items: center;
 
-            display: inline-block;
+            margin-bottom: 75px;
 
-            width: fit-content;
-
-            color: #f7eadb;
-
+            color: #FFFFFF;
             text-decoration: none;
-
-            font-family:
-                "Playfair Display",
-                Georgia,
-                serif;
-
-            font-size: 34px;
-
-            font-weight: 700;
-
-            letter-spacing: .13em;
-
-            margin-bottom: 58px;
         }
 
-
+        /* LOGO IMAGE SIZE */
+        .brand-logo img {
+            width: 230px;
+            height: auto;
+            display: block;
+            object-fit: contain;
+        }
         .eyebrow {
-
             font-size: 10px;
-
             font-weight: 700;
 
             letter-spacing: .24em;
@@ -502,75 +403,56 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             margin-bottom: 16px;
         }
 
-
         .brand-title {
-
             max-width: 430px;
 
-            font-family:
-                "Playfair Display",
-                Georgia,
-                serif;
+            font-family: "Playfair Display", Georgia, serif;
 
-            font-size:
-                clamp(42px, 5vw, 66px);
+            font-size: clamp(42px, 5vw, 66px);
 
             line-height: .98;
-
             letter-spacing: -.035em;
 
             font-weight: 600;
         }
 
+        .brand-title span {
+            color: var(--gold);
+        }
 
         .brand-description {
-
             max-width: 390px;
 
             margin-top: 24px;
 
-            color:
-                rgba(248, 242, 233, .72);
+            color: rgba(248, 242, 233, .72);
 
             font-size: 14px;
-
             line-height: 1.8;
         }
 
-
         .coffee-mark {
-
             width: 94px;
-
             height: 94px;
 
             margin-top: 48px;
 
-            border:
-                1px solid
-                rgba(255, 255, 255, .16);
-
+            border: 1px solid rgba(255, 255, 255, .16);
             border-radius: 50%;
 
             display: grid;
-
             place-items: center;
 
-            background:
-                rgba(255, 255, 255, .06);
+            background: rgba(255, 255, 255, .06);
 
             box-shadow:
-                inset 0 1px 0
-                rgba(255,255,255,.08);
+                inset 0 1px 0 rgba(255,255,255,.08);
 
             font-size: 36px;
         }
 
-
         .brand-footer {
-
-            color:
-                rgba(248, 242, 233, .52);
+            color: rgba(248, 242, 233, .52);
 
             font-size: 11px;
 
@@ -579,42 +461,30 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             text-transform: uppercase;
         }
 
-
-        /* =====================================================
+        /* =========================================================
            RIGHT REGISTER PANEL
-        ===================================================== */
+        ========================================================= */
 
         .register-panel {
-
-            padding:
-                50px
-                clamp(32px, 5vw, 72px);
+            padding: 54px clamp(32px, 5vw, 72px);
 
             display: flex;
-
             align-items: center;
 
-            background:
-                rgba(255, 253, 249, .92);
+            background: rgba(255, 253, 249, .92);
         }
 
-
         .register-content {
-
             width: 100%;
-
-            max-width: 420px;
+            max-width: 450px;
 
             margin: 0 auto;
         }
 
-
         .register-kicker {
-
             color: var(--caramel);
 
             font-size: 10px;
-
             font-weight: 800;
 
             letter-spacing: .22em;
@@ -624,16 +494,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             margin-bottom: 13px;
         }
 
-
         .register-title {
+            font-family: "Playfair Display", Georgia, serif;
 
-            font-family:
-                "Playfair Display",
-                Georgia,
-                serif;
-
-            font-size:
-                clamp(34px, 4vw, 48px);
+            font-size: clamp(34px, 4vw, 48px);
 
             line-height: 1.05;
 
@@ -642,26 +506,21 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             letter-spacing: -.025em;
         }
 
-
         .register-subtitle {
-
             color: var(--muted);
 
             margin-top: 12px;
 
             font-size: 14px;
-
             line-height: 1.7;
         }
 
+        /* =========================================================
+           ALERTS
+        ========================================================= */
 
-        /* =====================================================
-           MESSAGES
-        ===================================================== */
-
-        .message {
-
-            margin-top: 22px;
+        .alert {
+            margin-top: 24px;
 
             padding: 13px 15px;
 
@@ -672,75 +531,61 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             line-height: 1.5;
         }
 
-
-        .error-message {
-
-            border:
-                1px solid
-                rgba(169, 71, 55, .16);
+        .alert-error {
+            border: 1px solid rgba(169, 71, 55, .16);
 
             background: var(--danger-bg);
 
             color: var(--danger);
         }
 
-
-        .success-message {
-
-            border:
-                1px solid
-                rgba(71, 115, 77, .16);
+        .alert-success {
+            border: 1px solid rgba(57, 115, 75, .18);
 
             background: var(--success-bg);
 
             color: var(--success);
         }
 
-
-        /* =====================================================
+        /* =========================================================
            FORM
-        ===================================================== */
+        ========================================================= */
 
         form {
-
-            margin-top: 26px;
+            margin-top: 30px;
         }
-
 
         .form-group {
-
-            margin-bottom: 17px;
+            margin-bottom: 21px;
         }
 
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+
+            gap: 15px;
+        }
 
         label {
-
             display: block;
 
-            margin-bottom: 8px;
+            margin-bottom: 9px;
 
             color: var(--espresso);
 
             font-size: 12px;
-
             font-weight: 700;
 
             letter-spacing: .02em;
         }
 
-
         input {
-
             width: 100%;
-
-            height: 51px;
+            height: 54px;
 
             padding: 0 16px;
 
-            border:
-                1px solid
-                var(--border);
-
+            border: 1px solid var(--border);
             border-radius: 12px;
 
             outline: none;
@@ -750,48 +595,107 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             color: var(--espresso);
 
             font-family: inherit;
-
             font-size: 14px;
 
             transition: .2s ease;
         }
 
-
         input::placeholder {
-
             color: #aa9a8d;
         }
 
-
         input:hover {
-
-            border-color:
-                rgba(90, 56, 39, .28);
+            border-color: rgba(90, 56, 39, .28);
         }
 
-
         input:focus {
-
             border-color: var(--caramel);
 
             box-shadow:
-                0 0 0 4px
-                rgba(185, 130, 82, .12);
+                0 0 0 4px rgba(185, 130, 82, .12);
         }
 
+        /* =========================================================
+           PASSWORD FIELD
+        ========================================================= */
 
-        /* =====================================================
-           REGISTER BUTTON
-        ===================================================== */
+        .password-field {
+            position: relative;
+        }
 
-        .register-button {
+        .password-field input {
+            padding-right: 52px;
+        }
 
-            width: 100%;
+        .toggle-password {
+            position: absolute;
 
-            min-height: 53px;
+            right: 8px;
+            top: 50%;
+
+            transform: translateY(-50%);
+
+            width: 38px;
+            height: 38px;
+
+            display: grid;
+            place-items: center;
 
             border: 0;
 
+            background: transparent;
+
+            color: var(--caramel);
+
+            cursor: pointer;
+
+            font-size: 16px;
+
+            border-radius: 8px;
+
+            transition: .2s ease;
+        }
+
+        .toggle-password:hover {
+            background: rgba(185, 130, 82, .09);
+        }
+
+        .toggle-password:focus-visible {
+            outline: 2px solid var(--caramel);
+            outline-offset: 2px;
+        }
+
+        .toggle-password svg {
+            width: 19px;
+            height: 19px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* =========================================================
+           PASSWORD REQUIREMENT
+        ========================================================= */
+
+        .password-hint {
+            margin-top: 7px;
+
+            color: #958477;
+
+            font-size: 11px;
+        }
+
+        /* =========================================================
+           CREATE ACCOUNT BUTTON
+        ========================================================= */
+
+        .register-button {
+            width: 100%;
+            min-height: 54px;
+
+            border: 0;
             border-radius: 12px;
 
             margin-top: 5px;
@@ -803,7 +707,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             font-family: inherit;
 
             font-size: 12px;
-
             font-weight: 800;
 
             letter-spacing: .16em;
@@ -813,8 +716,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             cursor: pointer;
 
             box-shadow:
-                0 12px 25px
-                rgba(36, 21, 15, .17);
+                0 12px 25px rgba(36, 21, 15, .17);
 
             transition:
                 transform .2s ease,
@@ -822,32 +724,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 box-shadow .2s ease;
         }
 
-
         .register-button:hover {
-
             background: var(--coffee);
 
             transform: translateY(-2px);
 
             box-shadow:
-                0 16px 30px
-                rgba(36, 21, 15, .22);
+                0 16px 30px rgba(36, 21, 15, .22);
         }
 
-
         .register-button:active {
-
             transform: translateY(0);
         }
 
-
-        /* =====================================================
-           LOGIN LINK
-        ===================================================== */
+        /* =========================================================
+           LINKS
+        ========================================================= */
 
         .login-text {
-
-            margin-top: 21px;
+            margin-top: 24px;
 
             text-align: center;
 
@@ -856,9 +751,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             font-size: 13px;
         }
 
-
         .login-text a {
-
             color: var(--coffee);
 
             font-weight: 800;
@@ -868,29 +761,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             margin-left: 4px;
         }
 
-
         .login-text a:hover {
-
             color: var(--caramel);
         }
 
-
-        /* =====================================================
-           BACK HOME
-        ===================================================== */
-
         .back-home {
-
             display: block;
 
             width: fit-content;
 
-            margin: 20px auto 0;
+            margin: 25px auto 0;
 
             color: #8b786a;
 
             font-size: 12px;
-
             font-weight: 600;
 
             text-decoration: none;
@@ -898,172 +782,138 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             transition: color .2s ease;
         }
 
-
         .back-home:hover {
-
             color: var(--coffee);
         }
 
-
         .secure-note {
-
             display: flex;
 
             justify-content: center;
 
             gap: 7px;
 
-            margin-top: 20px;
+            margin-top: 27px;
 
-            color: #a08f81;
+            color: #9a887b;
 
-            font-size: 10px;
-
-            letter-spacing: .08em;
-
-            text-transform: uppercase;
+            font-size: 11px;
         }
 
+        .secure-note span:first-child {
+            color: var(--gold);
+        }
 
-        /* =====================================================
+        /* =========================================================
            RESPONSIVE
-        ===================================================== */
+        ========================================================= */
 
-        @media (max-width: 820px) {
-
-            body {
-
-                padding: 20px;
-            }
-
+        @media (max-width: 850px) {
 
             .register-shell {
-
                 grid-template-columns: 1fr;
 
-                max-width: 560px;
-
                 min-height: auto;
-
-                border-radius: 24px;
             }
-
 
             .brand-panel {
+                min-height: 360px;
 
-                min-height: 280px;
-
-                padding: 34px;
+                padding: 42px;
             }
-
 
             .brand-logo {
-
-                margin-bottom: 38px;
-
-                font-size: 29px;
+                margin-bottom: 35px;
             }
 
+            .brand-logo img {
+                width: 180px;
+                max-height: 75px;
+            }
 
             .brand-title {
-
-                font-size: 43px;
+                font-size: clamp(42px, 9vw, 58px);
             }
 
-
-            .brand-description,
             .coffee-mark {
-
-                display: none;
+                margin-top: 30px;
             }
-
 
             .brand-footer {
-
-                margin-top: 40px;
+                margin-top: 35px;
             }
 
-
             .register-panel {
-
-                padding:
-                    40px
-                    34px
-                    44px;
+                padding: 46px 36px;
             }
         }
 
-
-        @media (max-width: 480px) {
+        @media (max-width: 600px) {
 
             body {
-
-                padding: 12px;
+                padding: 18px 12px;
             }
-
 
             .register-shell {
-
-                border-radius: 20px;
+                border-radius: 22px;
             }
-
 
             .brand-panel {
+                min-height: 330px;
 
-                min-height: 240px;
-
-                padding:
-                    28px
-                    24px;
+                padding: 32px 25px;
             }
 
-
             .brand-logo {
-
-                font-size: 25px;
+                font-size: 29px;
 
                 margin-bottom: 32px;
             }
 
-
             .brand-title {
-
-                font-size: 38px;
+                font-size: 42px;
             }
 
+            .brand-description {
+                font-size: 13px;
+            }
+
+            .coffee-mark {
+                width: 72px;
+                height: 72px;
+
+                margin-top: 25px;
+
+                font-size: 28px;
+            }
 
             .register-panel {
-
-                padding:
-                    32px
-                    23px
-                    36px;
+                padding: 38px 24px;
             }
 
+            .form-row {
+                grid-template-columns: 1fr;
+
+                gap: 0;
+            }
 
             .register-title {
-
                 font-size: 36px;
-            }
-
-
-            input,
-            .register-button {
-
-                height: 51px;
             }
         }
 
+        @media (max-width: 400px) {
 
-        @media (prefers-reduced-motion: reduce) {
+            .brand-panel {
+                padding: 28px 20px;
+            }
 
-            *,
-            *::before,
-            *::after {
+            .register-panel {
+                padding: 32px 19px;
+            }
 
-                scroll-behavior: auto !important;
-
-                transition: none !important;
+            .register-title {
+                font-size: 33px;
             }
         }
 
@@ -1071,315 +921,371 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 </head>
 
-
 <body>
 
+    <main class="register-shell">
 
-<main class="register-shell">
+        <!-- =====================================================
+             LEFT BRAND PANEL
+        ====================================================== -->
 
+        <section class="brand-panel">
 
-    <!-- =====================================================
-         BRAND PANEL
-    ====================================================== -->
+            <div class="brand-content">
 
-    <section class="brand-panel">
-
-        <div class="brand-content">
-
-            <a
-                href="index.php"
-                class="brand-logo"
-                aria-label="Cafelia Home"
-            >
-                CAFELIA
-            </a>
-
-
-            <div class="eyebrow">
-                Join Cafelia
-            </div>
-
-
-            <h1 class="brand-title">
-
-                Make every coffee moment yours.
-
-            </h1>
-
-
-            <p class="brand-description">
-
-                Create your Cafelia account and enjoy
-                a smoother way to discover your favorites,
-                manage your cart, and place your orders.
-
-            </p>
-
-
-            <div
-                class="coffee-mark"
-                aria-hidden="true"
-            >
-                ☕
-            </div>
-
-        </div>
-
-
-        <div class="brand-footer">
-
-            Coffee, treats, and good moments.
-
-        </div>
-
-    </section>
-
-
-
-    <!-- =====================================================
-         REGISTER PANEL
-    ====================================================== -->
-
-    <section class="register-panel">
-
-        <div class="register-content">
-
-
-            <div class="register-kicker">
-
-                Cafelia Account
-
-            </div>
-
-
-            <h2 class="register-title">
-
-                Create account.
-
-            </h2>
-
-
-            <p class="register-subtitle">
-
-                Sign up to get started with Cafelia.
-
-            </p>
-
-
-            <!-- =================================================
-                 ERROR MESSAGE
-            ================================================= -->
-
-            <?php if ($error !== ""): ?>
-
-                <div class="message error-message">
-
-                    <?php
-                    echo htmlspecialchars(
-                        $error,
-                        ENT_QUOTES,
-                        "UTF-8"
-                    );
-                    ?>
-
-                </div>
-
-            <?php endif; ?>
-
-
-            <!-- =================================================
-                 SUCCESS MESSAGE
-            ================================================= -->
-
-            <?php if ($success !== ""): ?>
-
-                <div class="message success-message">
-
-                    <?php
-                    echo htmlspecialchars(
-                        $success,
-                        ENT_QUOTES,
-                        "UTF-8"
-                    );
-                    ?>
-
-                </div>
-
-            <?php endif; ?>
-
-
-            <!-- =================================================
-                 REGISTER FORM
-            ================================================= -->
-
-            <form
-                action="register.php"
-                method="POST"
-            >
-
-
-                <!-- NAME -->
-
-                <div class="form-group">
-
-                    <label for="name">
-                        Full Name
-                    </label>
-
-
-                    <input
-                        type="text"
-                        id="name"
-                        name="name"
-                        placeholder="Enter your full name"
-                        value="<?php
-                            echo htmlspecialchars(
-                                $name,
-                                ENT_QUOTES,
-                                "UTF-8"
-                            );
-                        ?>"
-                        autocomplete="name"
-                        minlength="2"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- EMAIL -->
-
-                <div class="form-group">
-
-                    <label for="email">
-                        Email Address
-                    </label>
-
-
-                    <input
-                        type="email"
-                        id="email"
-                        name="email"
-                        placeholder="Enter your email"
-                        value="<?php
-                            echo htmlspecialchars(
-                                $email,
-                                ENT_QUOTES,
-                                "UTF-8"
-                            );
-                        ?>"
-                        autocomplete="email"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- PASSWORD -->
-
-                <div class="form-group">
-
-                    <label for="password">
-                        Password
-                    </label>
-
-
-                    <input
-                        type="password"
-                        id="password"
-                        name="password"
-                        placeholder="Create a password"
-                        autocomplete="new-password"
-                        minlength="6"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- CONFIRM PASSWORD -->
-
-                <div class="form-group">
-
-                    <label for="confirm_password">
-                        Confirm Password
-                    </label>
-
-
-                    <input
-                        type="password"
-                        id="confirm_password"
-                        name="confirm_password"
-                        placeholder="Confirm your password"
-                        autocomplete="new-password"
-                        minlength="6"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- REGISTER BUTTON -->
-
-                <button
-                    type="submit"
-                    class="register-button"
-                >
-
-                    Create Account
-
-                </button>
-
-            </form>
-
-
-            <!-- =================================================
-                 LOGIN LINK
-            ================================================== -->
-
-            <p class="login-text">
-
-                Already have an account?
-
-                <a href="login.php">
-                    Login
+                <a href="index.php" class="brand-logo">
+                    <img src="assets/images/logo.png" alt="Acebes Coffee">
                 </a>
 
-            </p>
+                <p class="eyebrow">
+                    JOIN ACEBES COFFEE
+                </p>
 
+                <h1 class="brand-title">
+                    Your next
+                    <span>favorite</span>
+                    cup starts here.
+                </h1>
 
-            <!-- =================================================
-                 BACK HOME
-            ================================================== -->
+                <p class="brand-description">
+                    Create your Acebes Coffee account and enjoy a smoother
+                    ordering experience, from choosing your favorite
+                    coffee to keeping track of your orders.
+                </p>
 
-            <a
-                href="index.php"
-                class="back-home"
-            >
-
-                ← Back to Home
-
-            </a>
-
-
-            <div class="secure-note">
-
-                <span>●</span>
-
-                <span>
-                    Secure account registration
-                </span>
+                <div class="coffee-mark" aria-hidden="true">
+                    ☕
+                </div>
 
             </div>
 
+            <p class="brand-footer">
+                Coffee, treats, and moments worth remembering.
+            </p>
 
-        </div>
-
-    </section>
+        </section>
 
 
-</main>
+        <!-- =====================================================
+             RIGHT REGISTER PANEL
+        ====================================================== -->
 
+        <section class="register-panel">
+
+            <div class="register-content">
+
+                <p class="register-kicker">
+                    CUSTOMER ACCOUNT
+                </p>
+
+                <h2 class="register-title">
+                    Create your account.
+                </h2>
+
+                <p class="register-subtitle">
+                    Register once and make ordering at Acebes Coffee
+                    simple and convenient.
+                </p>
+
+
+                <?php if ($error !== ""): ?>
+
+                    <div class="alert alert-error">
+                        <?php echo htmlspecialchars($error); ?>
+                    </div>
+
+                <?php endif; ?>
+
+
+                <?php if ($success !== ""): ?>
+
+                    <div class="alert alert-success">
+                        <?php echo htmlspecialchars($success); ?>
+                    </div>
+
+                <?php endif; ?>
+
+
+                <form
+                    method="POST"
+                    action=""
+                    autocomplete="on"
+                >
+
+                    <!-- FULL NAME -->
+
+                    <div class="form-group">
+
+                        <label for="name">
+                            Full Name
+                        </label>
+
+                        <input
+                            type="text"
+                            id="name"
+                            name="name"
+                            value="<?php echo htmlspecialchars($name); ?>"
+                            placeholder="Enter your full name"
+                            autocomplete="name"
+                            maxlength="100"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- EMAIL -->
+
+                    <div class="form-group">
+
+                        <label for="email">
+                            Email Address
+                        </label>
+
+                        <input
+                            type="email"
+                            id="email"
+                            name="email"
+                            value="<?php echo htmlspecialchars($email); ?>"
+                            placeholder="you@example.com"
+                            autocomplete="email"
+                            maxlength="150"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- PASSWORD ROW -->
+
+                    <div class="form-row">
+
+                        <div class="form-group">
+
+                            <label for="password">
+                                Password
+                            </label>
+
+                            <div class="password-field">
+
+                                <input
+                                    type="password"
+                                    id="password"
+                                    name="password"
+                                    placeholder="At least 6 characters"
+                                    autocomplete="new-password"
+                                    minlength="6"
+                                    required
+                                >
+
+                                <button
+                                    type="button"
+                                    class="toggle-password"
+                                    data-target="password"
+                                    aria-label="Show password"
+                                    aria-pressed="false"
+                                    title="Show password"
+                                >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path>
+                                        <circle cx="12" cy="12" r="2.5"></circle>
+                                    </svg>
+                                </button>
+
+                            </div>
+
+                            <p class="password-hint">
+                                Use at least 6 characters.
+                            </p>
+
+                        </div>
+
+
+                        <!-- CONFIRM PASSWORD -->
+
+                        <div class="form-group">
+
+                            <label for="confirm_password">
+                                Confirm Password
+                            </label>
+
+                            <div class="password-field">
+
+                                <input
+                                    type="password"
+                                    id="confirm_password"
+                                    name="confirm_password"
+                                    placeholder="Repeat your password"
+                                    autocomplete="new-password"
+                                    minlength="6"
+                                    required
+                                >
+
+                                <button
+                                    type="button"
+                                    class="toggle-password"
+                                    data-target="confirm_password"
+                                    aria-label="Show password"
+                                    aria-pressed="false"
+                                    title="Show password"
+                                >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path>
+                                        <circle cx="12" cy="12" r="2.5"></circle>
+                                    </svg>
+                                </button>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- SUBMIT -->
+
+                    <button
+                        type="submit"
+                        class="register-button"
+                    >
+                        CREATE ACCOUNT
+                    </button>
+
+                </form>
+
+
+                <p class="login-text">
+                    Already have an account?
+                    <a href="login.php">
+                        Log In
+                    </a>
+                </p>
+
+
+                <a
+                    href="index.php"
+                    class="back-home"
+                >
+                    ← Back to Home
+                </a>
+
+
+                <div class="secure-note">
+
+                    <span>●</span>
+
+                    <span>
+                        Secure customer registration
+                    </span>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <script>
+
+        /*
+        |--------------------------------------------------------------------------
+        | SHOW / HIDE PASSWORD
+        |--------------------------------------------------------------------------
+        */
+
+        document
+            .querySelectorAll(".toggle-password")
+            .forEach(function (button) {
+
+                button.addEventListener("click", function () {
+
+                    const targetId = button.getAttribute("data-target");
+                    const input = document.getElementById(targetId);
+
+                    if (!input) {
+                        return;
+                    }
+
+                    const isHidden = input.type === "password";
+
+                    input.type = isHidden ? "text" : "password";
+
+                    button.setAttribute(
+                        "aria-label",
+                        isHidden ? "Hide password" : "Show password"
+                    );
+
+                    button.setAttribute(
+                        "title",
+                        isHidden ? "Hide password" : "Show password"
+                    );
+
+                    button.setAttribute(
+                        "aria-pressed",
+                        isHidden ? "true" : "false"
+                    );
+
+                    button.innerHTML = isHidden
+                        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 6.2A10.8 10.8 0 0 1 12 6c6.5 0 10 6 10 6a18.2 18.2 0 0 1-3.1 3.8"></path><path d="M6.5 8.2C3.8 10 2 12 2 12s3.5 6 10 6c1.6 0 3-.3 4.2-.8"></path><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"></path></svg>'
+                        : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>';
+
+                });
+
+            });
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | CLIENT-SIDE PASSWORD MATCH CHECK
+        |--------------------------------------------------------------------------
+        */
+
+        const registerForm = document.querySelector("form");
+        const password = document.getElementById("password");
+        const confirmPassword = document.getElementById("confirm_password");
+
+        if (registerForm && password && confirmPassword) {
+
+            registerForm.addEventListener("submit", function (event) {
+
+                if (password.value !== confirmPassword.value) {
+
+                    event.preventDefault();
+
+                    confirmPassword.setCustomValidity(
+                        "Passwords do not match."
+                    );
+
+                    confirmPassword.reportValidity();
+
+                } else {
+
+                    confirmPassword.setCustomValidity("");
+
+                }
+
+            });
+
+            confirmPassword.addEventListener("input", function () {
+
+                if (password.value === confirmPassword.value) {
+
+                    confirmPassword.setCustomValidity("");
+
+                } else {
+
+                    confirmPassword.setCustomValidity(
+                        "Passwords do not match."
+                    );
+                }
+
+            });
+
+        }
+
+    </script>
 
 </body>
 

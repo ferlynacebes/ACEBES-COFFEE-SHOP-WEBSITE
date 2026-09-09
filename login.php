@@ -555,37 +555,22 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
            LOGO
         ===================================================== */
 
-        .brand-logo {
-
+       .brand-logo {
             display: inline-flex;
-            align-items: left-align;
-            margin-top: 0px;
-            margin-bottom: 60px;
+            align-items: center;
+
+            margin-bottom: 75px;
 
             color: #FFFFFF;
-
-            font-family:
-                'Pacifico',
-                cursive;
-
-            font-size: 28px;
-
             text-decoration: none;
-
         }
 
+        /* LOGO IMAGE SIZE */
         .brand-logo img {
-            display: block;
-            width: 150px;
+            width: 230px;
             height: auto;
-            max-height: 70px;
+            display: block;
             object-fit: contain;
-        }
-
-        .brand-logo:hover {
-
-            color: #C49A6C;
-
         }
 
 
@@ -659,8 +644,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         .coffee-mark {
 
             margin-top: 45px;
-
-            margin-bottom: 0;
 
             color: #C49A6C;
 
@@ -1226,7 +1209,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <div class="brand-content">
 
 
-           <a
+            <a
                 href="index.php"
                 class="brand-logo"
                 aria-label="Acebes Coffee Shop Home"

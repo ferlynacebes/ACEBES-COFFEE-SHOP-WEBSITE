@@ -1,16 +1,30 @@
 <?php
-include 'includes/header.php';
+
+/*
+|--------------------------------------------------------------------------
+| DATABASE CONNECTION
+|--------------------------------------------------------------------------
+| Save contact form submissions into the Acebes Coffee database.
+|--------------------------------------------------------------------------
+*/
+require_once __DIR__ . "/config/db.php";
+
+include __DIR__ . "/includes/header.php";
 
 $message = "";
 $message_type = "";
+
+$name = "";
+$email = "";
+$subject = "";
+$user_message = "";
 
 
 /*
 |--------------------------------------------------------------------------
 | CONTACT FORM PROCESSING
 |--------------------------------------------------------------------------
-| For now, this validates the form and displays a confirmation message.
-| Later, this can be connected to a database if needed.
+| Validate the form and save valid submissions to contact_messages.
 |--------------------------------------------------------------------------
 */
 
@@ -21,12 +35,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $subject = trim($_POST["subject"] ?? "");
     $user_message = trim($_POST["message"] ?? "");
 
-
     if (
-        empty($name) ||
-        empty($email) ||
-        empty($subject) ||
-        empty($user_message)
+        $name === "" ||
+        $email === "" ||
+        $subject === "" ||
+        $user_message === ""
     ) {
 
         $message = "Please complete all fields.";
@@ -39,10 +52,50 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     } else {
 
-        $message = "Thank you, " . htmlspecialchars($name) .
-                   "! Your message has been received.";
+        $stmt = $conn->prepare("
+            INSERT INTO contact_messages
+                (name, email, subject, message)
+            VALUES
+                (?, ?, ?, ?)
+        ");
 
-        $message_type = "success";
+        if ($stmt) {
+
+            $stmt->bind_param(
+                "ssss",
+                $name,
+                $email,
+                $subject,
+                $user_message
+            );
+
+            if ($stmt->execute()) {
+
+                $message = "Thank you, " .
+                    htmlspecialchars($name, ENT_QUOTES, "UTF-8") .
+                    "! Your message has been sent successfully.";
+
+                $message_type = "success";
+
+                // Clear fields after successful submission.
+                $name = "";
+                $email = "";
+                $subject = "";
+                $user_message = "";
+
+            } else {
+
+                $message = "Sorry, your message could not be sent right now. Please try again.";
+                $message_type = "error";
+            }
+
+            $stmt->close();
+
+        } else {
+
+            $message = "Sorry, the message service is temporarily unavailable.";
+            $message_type = "error";
+        }
     }
 }
 ?>
@@ -289,11 +342,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             id="name"
                             name="name"
                             placeholder="Your name"
-                            value="<?php
-                                echo htmlspecialchars(
-                                    $_POST["name"] ?? ""
-                                );
-                            ?>"
+                            value="<?php echo htmlspecialchars($name, ENT_QUOTES, "UTF-8"); ?>"
                             autocomplete="name"
                             required
                         >
@@ -314,11 +363,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             id="email"
                             name="email"
                             placeholder="you@example.com"
-                            value="<?php
-                                echo htmlspecialchars(
-                                    $_POST["email"] ?? ""
-                                );
-                            ?>"
+                            value="<?php echo htmlspecialchars($email, ENT_QUOTES, "UTF-8"); ?>"
                             autocomplete="email"
                             required
                         >
@@ -339,11 +384,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             id="subject"
                             name="subject"
                             placeholder="What is this about?"
-                            value="<?php
-                                echo htmlspecialchars(
-                                    $_POST["subject"] ?? ""
-                                );
-                            ?>"
+                            value="<?php echo htmlspecialchars($subject, ENT_QUOTES, "UTF-8"); ?>"
                             required
                         >
 
@@ -363,11 +404,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             name="message"
                             placeholder="Write your message here..."
                             required
-                        ><?php
-                            echo htmlspecialchars(
-                                $_POST["message"] ?? ""
-                            );
-                        ?></textarea>
+                        ><?php echo htmlspecialchars($user_message, ENT_QUOTES, "UTF-8"); ?></textarea>
 
                     </div>
 

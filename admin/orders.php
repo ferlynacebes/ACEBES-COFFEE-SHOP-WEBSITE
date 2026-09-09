@@ -98,6 +98,14 @@ if ($search !== "") {
             o.phone,
             o.address,
             o.total_amount,
+            (
+                SELECT GROUP_CONCAT(
+                    CONCAT(oi.product_name, ' × ', oi.quantity)
+                    SEPARATOR ', '
+                )
+                FROM order_items oi
+                WHERE oi.order_id = o.id
+            ) AS products,
             o.payment_method,
             o.gcash_receipt,
             o.status,
@@ -152,6 +160,14 @@ if ($search !== "") {
             o.phone,
             o.address,
             o.total_amount,
+            (
+                SELECT GROUP_CONCAT(
+                    CONCAT(oi.product_name, ' × ', oi.quantity)
+                    SEPARATOR ', '
+                )
+                FROM order_items oi
+                WHERE oi.order_id = o.id
+            ) AS products,
             o.payment_method,
             o.gcash_receipt,
             o.status,
@@ -447,6 +463,16 @@ function statusClass(string $status): string
             color: #2a1a13;
             font-weight: 800;
             white-space: nowrap;
+        }
+
+        .order-products {
+            display: block;
+            max-width: 260px;
+            margin-bottom: 6px;
+            color: #6f5a4f;
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1.5;
         }
 
         .payment-method {
@@ -853,6 +879,12 @@ function statusClass(string $status): string
 
 
                             <td>
+
+                                <?php if (!empty($order["products"])): ?>
+                                    <span class="order-products">
+                                        <?= e((string) $order["products"]) ?>
+                                    </span>
+                                <?php endif; ?>
 
                                 <span class="order-total">
                                     ₱<?= number_format(
